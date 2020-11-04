@@ -48,9 +48,11 @@ class Classified_Tiles_Dataset(Dataset):
         mask = Image.open(mask_path)
 
         if self.transforms is not None:
-            image, mask = self.transforms(image, mask)
+            image = self.transforms(image)
+            mask = self.transforms(mask)
         # 归一化处理
-        image = preprocess(image)
+        # image = preprocess(image)
+        image = np.array(image)
         mask = np.array(mask)
         return image, mask
 
