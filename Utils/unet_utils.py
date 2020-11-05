@@ -14,26 +14,23 @@ from models.Unet.unet_model import Unet
 
 
 def unet_transforms():
-    hp = random.choice([0, 1])
-    vp = random.choice([0, 1])
-    transforms = torchvision.transforms.Compose(
-        [torchvision.transforms.RandomHorizontalFlip(hp),
-         torchvision.transforms.RandomVerticalFlip(vp),
-         torchvision.transforms.ToTensor()]
-    )
-    print(hp,vp)
+    '''返回一个数据增强的列表'''
+    transforms = [
+        torchvision.transforms.RandomHorizontalFlip(1),
+        torchvision.transforms.RandomVerticalFlip(1)
+    ]
     return transforms
 
 
 def plot(image, label):
-    print(image.size,label.size)
+    print(image.size, label.size)
     unloader = torchvision.transforms.ToPILImage()
     image = unloader(image[0])
     print(image.size)
     label = unloader(label[0])
     label = np.asarray(label)
     label_copy = label.copy()
-    label_copy[label_copy==1] = 255
+    label_copy[label_copy == 1] = 255
     label = Image.fromarray(label_copy)
 
     plt.figure()
@@ -50,8 +47,8 @@ def unet_train(model, data_path, batch_size=4, lr=0.001, split=0.2):
     val_size = int(split * len(unet_dataset))
     train_size = int(len(unet_dataset) - val_size)
     train_dataset, val_dataset = torch.utils.data.random_split(unet_dataset, [train_size, val_size])
-    data_loader = DataLoader(train_dataset,batch_size=batch_size)
-    for image,label in data_loader:
+    data_loader = DataLoader(train_dataset, batch_size=batch_size)
+    for image, label in data_loader:
         plot(image, label)
 
 
