@@ -161,6 +161,8 @@ def unet_train(model, data_path, epochs=40, batch_size=1, lr=0.001, split=0.2, s
 
     return best_mode, model
 
+def model_pred(model):
+    pass
 
 if __name__ == '__main__':
     data_path = r'F:\deepLearning\data\building]Data\trainingData\building3000_Classfied_Tile'
