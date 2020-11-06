@@ -40,10 +40,11 @@ class Classified_Tiles_Dataset(Dataset):
 
         # 变换中随机挑选一个变换
         if self.transforms is not None:
-            transform_index = random.randint(0, len(self.transforms)-1)
-            print(transform_index)
-            image = self.transforms[transform_index](image)
-            mask = self.transforms[transform_index](mask)
+            transform_index = random.randint(0, len(self.transforms))
+            if transform_index != len(self.transforms):
+                # print(transform_index)
+                image = self.transforms[transform_index](image)
+                mask = self.transforms[transform_index](mask)
         # totensor中就已经做了归一化处理以及纬度变换
         totensor = torchvision.transforms.ToTensor()
         image = totensor(image)

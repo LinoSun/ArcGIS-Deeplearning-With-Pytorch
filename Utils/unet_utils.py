@@ -1,16 +1,22 @@
-import random
+import copy
+import os
+
 import numpy as np
 import torch
 import torchvision
 import torch.nn as nn
 from torch import optim
 from torch.utils.data import DataLoader
+from torch.optim.lr_scheduler import StepLR
 import matplotlib.pyplot as plt
 import time
 from PIL import Image
 
 from DataloaderUtils.dataset_utils import Classified_Tiles_Dataset
 from models.Unet.unet_model import Unet
+
+plt.rcParams['font.sans-serif'] = ['SimHei']  # 用来正常显示中文标签
+plt.rcParams['axes.unicode_minus'] = False  # 用来正常显示负号
 
 
 def unet_transforms():
@@ -20,6 +26,16 @@ def unet_transforms():
         torchvision.transforms.RandomVerticalFlip(1)
     ]
     return transforms
+
+
+def smooth(v, w=0.85):
+    last = v[0]
+    smoothed = []
+    for point in v:
+        smoothed_val = last * w + (1 - w) * point
+        smoothed.append(smoothed_val)
+        last = smoothed_val
+    return smoothed
 
 
 def plot(image, label):
@@ -40,18 +56,114 @@ def plot(image, label):
     plt.imshow(label)
 
 
-def unet_train(model, data_path, batch_size=4, lr=0.001, split=0.2):
+def unet_train(model, data_path, epochs=40, batch_size=1, lr=0.001, split=0.2, step_size=5,
+               save_inter=1, disp_inter=1, checkpoint_dir=None):
+    # 模型保存地址
+    if checkpoint_dir is None:
+        checkpoint_dir = os.path.join(data_path, 'model')
+        if not os.path.exists(checkpoint_dir):
+            os.makedirs(checkpoint_dir)
+
     # 加载训练集
     unet_dataset = Classified_Tiles_Dataset(data_path, transforms=unet_transforms())
     # 切分数据集
     val_size = int(split * len(unet_dataset))
     train_size = int(len(unet_dataset) - val_size)
     train_dataset, val_dataset = torch.utils.data.random_split(unet_dataset, [train_size, val_size])
-    data_loader = DataLoader(train_dataset, batch_size=batch_size)
-    for image, label in data_loader:
-        plot(image, label)
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    # 加载数据集
+    train_data_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, drop_last=True)
+    val_data_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=True, drop_last=True)
+
+    # 优化器
+    optimizer = optim.SGD(model.parameters(), lr=lr)
+    # 学习率调整策略
+    scheduler = StepLR(optimizer, step_size=step_size)
+    # 损失函数
+    criterion = nn.CrossEntropyLoss(reduction='mean').to(device)
+
+    # 主循环
+    train_loss_total_epochs, val_loss_total_epochs, epoch_lr = [], [], []
+    best_loss = 1e50
+    best_mode = copy.deepcopy(model)
+    for epoch in range(epochs):
+        # 训练阶段
+        model.train()
+        train_loss_per_epoch = 0
+        for image, label in train_data_loader:
+            image, label = image.to(device), label.to(device)
+            # 梯度清零
+            optimizer.zero_grad()
+            pred = model(image)
+            # 因为损失函数，所以降维
+            label = torch.squeeze(label,0).long()
+            # print(pred.size(),label.size())
+            loss = criterion(pred, label)
+            loss.backward()
+            optimizer.step()
+            train_loss_per_epoch += loss.item()
+        # 验证阶段
+        model.eval()
+        val_loss_per_epoch = 0
+        with torch.no_grad():
+            for image, label in val_data_loader:
+                data, label = image.to(device), label.to(device)
+                pred = model(data)
+                # 损失函数
+                label = torch.squeeze(label,0).long()
+                loss = criterion(pred, label)
+                val_loss_per_epoch += loss.item()
+
+        # 一个epoch结束
+        train_loss_per_epoch = train_loss_per_epoch / train_size
+        val_loss_per_epoch = val_loss_per_epoch / val_size
+        train_loss_total_epochs.append(train_loss_per_epoch)
+        val_loss_total_epochs.append(val_loss_per_epoch)
+        epoch_lr.append(optimizer.param_groups[0]['lr'])
+        # 保存模型
+        if epoch % save_inter == 0:
+            state = {'epoch': epoch, 'state_dict': model.state_dict(), 'optimizer': optimizer.state_dict()}
+            filename = os.path.join(checkpoint_dir, 'checkpoint-epoch{}.pth'.format(epoch))
+            torch.save(state, filename)
+        # 保存最优模型
+        if val_loss_per_epoch < best_loss:  # train_loss_per_epoch valid_loss_per_epoch
+            state = {'epoch': epoch, 'state_dict': model.state_dict(), 'optimizer': optimizer.state_dict()}
+            filename = os.path.join(checkpoint_dir, 'checkpoint-best.pth')
+            torch.save(state, filename)
+            best_loss = val_loss_per_epoch
+            best_mode = copy.deepcopy(model)
+        scheduler.step()
+        # 显示loss
+        if epoch % disp_inter == 0:
+            print('Epoch:{}, Training Loss:{:.8f}, Validation Loss:{:.8f}'.format(epoch, train_loss_per_epoch,
+                                                                                  val_loss_per_epoch))
+
+    # 训练loss曲线
+    if plot:
+        x = [i for i in range(epochs)]
+        fig = plt.figure(figsize=(12, 4))
+        ax = fig.add_subplot(1, 2, 1)
+        ax.plot(x, smooth(train_loss_total_epochs, 0.6), label='训练集loss')
+        ax.plot(x, smooth(val_loss_total_epochs, 0.6), label='验证集loss')
+        ax.set_xlabel('Epoch', fontsize=15)
+        ax.set_ylabel('CrossEntropy', fontsize=15)
+        ax.set_title(f'训练曲线', fontsize=15)
+        ax.grid(True)
+        plt.legend(loc='upper right', fontsize=15)
+        ax = fig.add_subplot(1, 2, 2)
+        ax.plot(x, epoch_lr, label='Learning Rate')
+        ax.set_xlabel('Epoch', fontsize=15)
+        ax.set_ylabel('Learning Rate', fontsize=15)
+        ax.set_title(f'学习率变化曲线', fontsize=15)
+        ax.grid(True)
+        plt.legend(loc='upper right', fontsize=15)
+        plt.show()
+
+    return best_mode, model
 
 
 if __name__ == '__main__':
     data_path = r'F:\deepLearning\data\building]Data\trainingData\building3000_Classfied_Tile'
-    unet_train(Unet, data_path)
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    model = Unet(3, 2).to(device)
+    best_model, model = unet_train(model, data_path,epochs=2)
