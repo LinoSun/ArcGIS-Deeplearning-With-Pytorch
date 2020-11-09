@@ -1,4 +1,5 @@
 import copy
+import math
 import os
 
 import numpy as np
@@ -57,7 +58,7 @@ def plot(image, label):
 
 
 def unet_train(model, data_path, epochs=40, batch_size=1, lr=0.001, split=0.2, step_size=5,
-               save_inter=1, disp_inter=1, checkpoint_dir=None):
+               save_inter=1, disp_inter=1, checkpoint_dir=None, find_lr=False):
     # 模型保存地址
     if checkpoint_dir is None:
         checkpoint_dir = os.path.join(data_path, 'model')
@@ -81,6 +82,11 @@ def unet_train(model, data_path, epochs=40, batch_size=1, lr=0.001, split=0.2, s
     scheduler = StepLR(optimizer, step_size=step_size)
     # 损失函数
     criterion = nn.CrossEntropyLoss(reduction='mean').to(device)
+    # 查找学习率
+    if find_lr:
+        logs, losses = lr_find(model, train_data_loader, optimizer, criterion)
+        plt.plot(logs[10:-5], losses[10:-5])
+        return [logs,losses]
 
     # 主循环
     train_loss_total_epochs, val_loss_total_epochs, epoch_lr = [], [], []
@@ -96,7 +102,7 @@ def unet_train(model, data_path, epochs=40, batch_size=1, lr=0.001, split=0.2, s
             optimizer.zero_grad()
             pred = model(image)
             # 因为损失函数，所以降维
-            label = torch.squeeze(label,0).long()
+            label = torch.squeeze(label, 0).long()
             # print(pred.size(),label.size())
             loss = criterion(pred, label)
             loss.backward()
@@ -110,7 +116,7 @@ def unet_train(model, data_path, epochs=40, batch_size=1, lr=0.001, split=0.2, s
                 data, label = image.to(device), label.to(device)
                 pred = model(data)
                 # 损失函数
-                label = torch.squeeze(label,0).long()
+                label = torch.squeeze(label, 0).long()
                 loss = criterion(pred, label)
                 val_loss_per_epoch += loss.item()
 
@@ -161,11 +167,58 @@ def unet_train(model, data_path, epochs=40, batch_size=1, lr=0.001, split=0.2, s
 
     return best_mode, model
 
+
 def model_pred(model):
     pass
+
+
+def lr_find(model, trn_loader, optimizer, criterion, init_value=1e-8, final_value=10., beta=0.98):
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    num = len(trn_loader) - 1
+    mult = (final_value / init_value) ** (1 / num)
+    lr = init_value
+    optimizer.param_groups[0]['lr'] = lr
+    avg_loss = 0.
+    best_loss = 0.
+    batch_num = 0
+    losses = []
+    log_lrs = []
+    for data in trn_loader:
+        batch_num += 1
+        # As before, get the loss for this mini-batch of inputs/outputs
+        inputs, labels = data
+        inputs, labels = inputs.to(device), labels.to(device)
+        labels = torch.squeeze(labels, 0).long()
+        optimizer.zero_grad()
+        outputs = model(inputs)
+        loss = criterion(outputs, labels)
+        # print(loss.item(),loss.data)
+        # Compute the smoothed loss
+        avg_loss = beta * avg_loss + (1 - beta) * loss.item()
+        smoothed_loss = avg_loss / (1 - beta ** batch_num)
+        # Stop if the loss is exploding
+        if batch_num > 1 and smoothed_loss > 4 * best_loss:
+            return log_lrs, losses
+        # Record the best loss
+        if smoothed_loss < best_loss or batch_num == 1:
+            best_loss = smoothed_loss
+        # Store the values
+        losses.append(smoothed_loss)
+        log_lrs.append(math.log10(lr))
+        # Do the SGD step
+        loss.backward()
+        optimizer.step()
+        # Update the lr for the next step
+        lr *= mult
+        optimizer.param_groups[0]['lr'] = lr
+    return log_lrs, losses
+
 
 if __name__ == '__main__':
     data_path = r'F:\deepLearning\data\building]Data\trainingData\building3000_Classfied_Tile'
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = Unet(3, 2).to(device)
-    best_model, model = unet_train(model, data_path,epochs=2)
+    # best_model, model = unet_train(model, data_path, epochs=2, find_lr=True)
+    logs, losses = unet_train(model, data_path, epochs=2, find_lr=True)
+    plt.plot(logs,losses)
+    plt.show()
