@@ -13,7 +13,7 @@ import matplotlib.pyplot as plt
 import time
 from PIL import Image
 
-from DataloaderUtils.dataset_utils import Classified_Tiles_Dataset
+from datasets.dataset_utils import Classified_Tiles_Dataset
 from models.Unet.unet_model import Unet
 
 plt.rcParams['font.sans-serif'] = ['SimHei']  # 用来正常显示中文标签
