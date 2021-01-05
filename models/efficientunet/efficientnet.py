@@ -15,7 +15,8 @@ class EfficientNet(nn.Module):
         batch_norm_epsilon = self.global_params.batch_norm_epsilon
 
         # Stem
-        in_channels = 3
+        # 0104 linoadd
+        in_channels = 4
         out_channels = round_filters(32, self.global_params)
         self._conv_stem = Conv2dSamePadding(in_channels,
                                             out_channels,
